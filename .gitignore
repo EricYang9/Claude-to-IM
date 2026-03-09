@@ -6,3 +6,17 @@ dist/
 *.d.ts.map
 !src/**/*.js
 .DS_Store
+.env
+.env.*
+*.env
+config.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.secrets
+data/
+logs/
+runtime/

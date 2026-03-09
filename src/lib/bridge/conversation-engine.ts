@@ -50,6 +50,15 @@ export interface ConversationResult {
   sdkSessionId: string | null;
 }
 
+function extractAssistantText(contentBlocks: MessageContentBlock[]): string {
+  return contentBlocks
+    .filter((b): b is Extract<MessageContentBlock, { type: 'text' }> => b.type === 'text')
+    .map((b) => b.text.trim())
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+}
+
 /**
  * Process an inbound message: send to Claude, consume the response stream,
  * save to DB, and return the result.
@@ -347,16 +356,7 @@ async function consumeStream(
 
     // Save assistant message
     if (contentBlocks.length > 0) {
-      const hasToolBlocks = contentBlocks.some(
-        (b) => b.type === 'tool_use' || b.type === 'tool_result'
-      );
-      const content = hasToolBlocks
-        ? JSON.stringify(contentBlocks)
-        : contentBlocks
-            .filter((b): b is Extract<MessageContentBlock, { type: 'text' }> => b.type === 'text')
-            .map((b) => b.text)
-            .join('\n\n')
-            .trim();
+      const content = extractAssistantText(contentBlocks);
 
       if (content) {
         store.addMessage(sessionId, 'assistant', content, tokenUsage ? JSON.stringify(tokenUsage) : null);
@@ -364,11 +364,7 @@ async function consumeStream(
     }
 
     // Extract text-only response for IM delivery
-    const responseText = contentBlocks
-      .filter((b): b is Extract<MessageContentBlock, { type: 'text' }> => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim();
+    const responseText = extractAssistantText(contentBlocks);
 
     return {
       responseText,
@@ -384,16 +380,7 @@ async function consumeStream(
       contentBlocks.push({ type: 'text', text: currentText });
     }
     if (contentBlocks.length > 0) {
-      const hasToolBlocks = contentBlocks.some(
-        (b) => b.type === 'tool_use' || b.type === 'tool_result'
-      );
-      const content = hasToolBlocks
-        ? JSON.stringify(contentBlocks)
-        : contentBlocks
-            .filter((b): b is Extract<MessageContentBlock, { type: 'text' }> => b.type === 'text')
-            .map((b) => b.text)
-            .join('\n\n')
-            .trim();
+      const content = extractAssistantText(contentBlocks);
       if (content) {
         store.addMessage(sessionId, 'assistant', content);
       }

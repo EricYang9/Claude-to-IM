@@ -59,9 +59,30 @@ export function buildCardContent(text: string): string {
  * Aligned with Openclaw's buildFeishuPostMessagePayload().
  */
 export function buildPostContent(text: string): string {
+  const normalized = text
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const content: Array<Array<{ tag: 'md' | 'text'; text: string }>> = [];
+  let lastWasSpacer = false;
+
+  for (const rawLine of normalized.split('\n')) {
+    const line = rawLine.trimEnd();
+    if (!line.trim()) {
+      if (content.length > 0 && !lastWasSpacer) {
+        content.push([{ tag: 'text', text: ' ' }]);
+        lastWasSpacer = true;
+      }
+      continue;
+    }
+    content.push([{ tag: 'md', text: line }]);
+    lastWasSpacer = false;
+  }
+
   return JSON.stringify({
     zh_cn: {
-      content: [[{ tag: 'md', text }]],
+      content: content.length > 0 ? content : [[{ tag: 'md', text: normalized }]],
     },
   });
 }

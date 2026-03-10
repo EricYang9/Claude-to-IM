@@ -588,8 +588,8 @@ async function handleMessage(
     }
 
     // Persist the actual SDK session ID for future resume.
-    // If the result has an error and no session ID was captured, clear the
-    // stale ID so the next message starts fresh instead of retrying a broken resume.
+    // On error, keep the existing binding unchanged so the bridge does not
+    // silently drift to a fresh SDK session.
     if (binding.id) {
       try {
         const update = computeSdkSessionUpdate(result.sdkSessionId, result.hasError);
@@ -838,13 +838,10 @@ async function handleCommand(
  */
 export function computeSdkSessionUpdate(
   sdkSessionId: string | null | undefined,
-  hasError: boolean,
+  _hasError: boolean,
 ): string | null {
-  if (sdkSessionId && !hasError) {
+  if (sdkSessionId && !_hasError) {
     return sdkSessionId;
-  }
-  if (hasError) {
-    return '';
   }
   return null;
 }

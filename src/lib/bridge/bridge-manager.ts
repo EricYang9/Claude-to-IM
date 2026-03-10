@@ -7,7 +7,7 @@
  * Uses globalThis to survive Next.js HMR in development.
  */
 
-import type { BridgeStatus, InboundMessage, OutboundMessage, StreamingPreviewState } from './types.js';
+import type { BridgeStatus, ChannelBinding, InboundMessage, OutboundMessage, StreamingPreviewState } from './types.js';
 import { createAdapter, getRegisteredTypes } from './channel-adapter.js';
 import type { BaseChannelAdapter } from './channel-adapter.js';
 // Side-effect import: triggers self-registration of all adapter factories
@@ -735,14 +735,7 @@ async function handleCommand(
 
     case '/status': {
       const binding = router.resolve(msg.address);
-      response = [
-        '<b>Bridge Status</b>',
-        '',
-        `Session: <code>${binding.codepilotSessionId.slice(0, 8)}...</code>`,
-        `CWD: <code>${escapeHtml(binding.workingDirectory || '~')}</code>`,
-        `Mode: <b>${binding.mode}</b>`,
-        `Model: <code>${binding.model || 'default'}</code>`,
-      ].join('\n');
+      response = formatStatusResponse(binding);
       break;
     }
 
@@ -823,6 +816,18 @@ async function handleCommand(
       replyToMessageId: msg.messageId,
     });
   }
+}
+
+export function formatStatusResponse(binding: ChannelBinding): string {
+  return [
+    '<b>Bridge Status</b>',
+    '',
+    `Session: <code>${binding.codepilotSessionId.slice(0, 8)}...</code>`,
+    `Code Session ID: <code>${escapeHtml(binding.sdkSessionId || 'unset')}</code>`,
+    `CWD: <code>${escapeHtml(binding.workingDirectory || '~')}</code>`,
+    `Mode: <b>${binding.mode}</b>`,
+    `Model: <code>${binding.model || 'default'}</code>`,
+  ].join('\n');
 }
 
 // ── SDK Session Update Logic ─────────────────────────────────

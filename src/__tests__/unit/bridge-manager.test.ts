@@ -12,6 +12,7 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { initBridgeContext } from '../../lib/bridge/context';
 import type { BridgeStore, LifecycleHooks } from '../../lib/bridge/host';
+import type { ChannelBinding } from '../../lib/bridge/types';
 
 // ── Test the session lock mechanism directly ────────────────
 // We test the processWithSessionLock pattern by extracting its logic.
@@ -130,6 +131,30 @@ describe('bridge-manager lifecycle', () => {
     const status = getStatus();
     assert.equal(status.running, false);
     assert.equal(status.adapters.length, 0);
+  });
+});
+
+describe('bridge-manager status formatting', () => {
+  it('includes full sdk session id in /status output', async () => {
+    const { formatStatusResponse } = await import('../../lib/bridge/bridge-manager');
+    const binding: ChannelBinding = {
+      id: 'binding-1',
+      channelType: 'feishu',
+      chatId: 'chat-1',
+      codepilotSessionId: '55e0bd95-3b21-4fcf-b81b-f4d9310b462e',
+      sdkSessionId: '019caea8-e67f-73d0-84b2-10191ed1a005',
+      workingDirectory: '/opt/projects/DcMonitor',
+      model: '',
+      mode: 'code',
+      active: true,
+      createdAt: '2026-03-08T10:51:55.671Z',
+      updatedAt: '2026-03-10T02:57:17Z',
+    };
+
+    const output = formatStatusResponse(binding);
+    assert.match(output, /Session: <code>55e0bd95\.\.\.<\/code>/);
+    assert.match(output, /Code Session ID: <code>019caea8-e67f-73d0-84b2-10191ed1a005<\/code>/);
+    assert.doesNotMatch(output, /Code Session ID: <code>019caea8\.\.\.<\/code>/);
   });
 });
 

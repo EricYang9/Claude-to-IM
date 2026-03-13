@@ -59,6 +59,24 @@ function getStreamConfig(channelType = 'telegram'): StreamConfig {
   return { intervalMs, minDeltaChars, maxChars };
 }
 
+/**
+ * Check if a message looks like a numeric permission shortcut (1/2/3) for
+ * feishu/qq channels WITH at least one pending permission in that chat.
+ *
+ * This is used by the adapter loop to route these messages to the inline
+ * (non-session-locked) path, avoiding deadlock: the session is blocked
+ * waiting for the permission to be resolved, so putting "1" behind the
+ * session lock would deadlock.
+ */
+function isNumericPermissionShortcut(channelType: string, rawText: string, chatId: string): boolean {
+  if (channelType !== 'feishu' && channelType !== 'qq') return false;
+  const normalized = rawText.normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  if (!/^[123]$/.test(normalized)) return false;
+  const { store } = getBridgeContext();
+  const pending = store.listPendingPermissionLinksByChat(chatId);
+  return pending.length > 0; // any pending → route to inline path
+}
+
 /** Fire-and-forget: send a preview draft. Only degrades on permanent failure. */
 function flushPreview(
   adapter: BaseChannelAdapter,
@@ -366,9 +384,19 @@ function runAdapterLoop(adapter: BaseChannelAdapter): void {
         const msg = await adapter.consumeOne();
         if (!msg) continue; // Adapter stopped
 
-        // Callback queries and commands are lightweight — process inline.
+        // Callback queries, commands, and numeric permission shortcuts are
+        // lightweight — process inline (outside session lock).
         // Regular messages use per-session locking for concurrency.
-        if (msg.callbackData || msg.text.trim().startsWith('/')) {
+        //
+        // IMPORTANT: numeric shortcuts (1/2/3) for feishu/qq MUST run outside
+        // the session lock. The current session is blocked waiting for the
+        // permission to be resolved; if "1" enters the session lock queue it
+        // deadlocks (permission waits for "1", "1" waits for lock release).
+        if (
+          msg.callbackData ||
+          msg.text.trim().startsWith('/') ||
+          isNumericPermissionShortcut(adapter.channelType, msg.text.trim(), msg.address.chatId)
+        ) {
           await handleMessage(adapter, msg);
         } else {
           const binding = router.resolve(msg.address);
@@ -459,6 +487,63 @@ async function handleMessage(
     }
     ack();
     return;
+  }
+
+  // ── Numeric shortcut for permission replies (feishu/qq only) ──
+  // On mobile, typing `/perm allow <uuid>` is painful.
+  // If the user sends "1", "2", or "3" and there is exactly one pending
+  // permission for this chat, map it: 1→allow, 2→allow_session, 3→deny.
+  //
+  // Input normalization: mobile keyboards / IM clients may send fullwidth
+  // digits (１２３), digits with zero-width joiners, or other Unicode
+  // variants. NFKC normalization folds them all to ASCII 1/2/3.
+  if (adapter.channelType === 'feishu' || adapter.channelType === 'qq') {
+    // eslint-disable-next-line no-control-regex
+    const normalized = rawText.normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    if (/^[123]$/.test(normalized)) {
+      const pendingLinks = store.listPendingPermissionLinksByChat(msg.address.chatId);
+      if (pendingLinks.length === 1) {
+        const actionMap: Record<string, string> = { '1': 'allow', '2': 'allow_session', '3': 'deny' };
+        const action = actionMap[normalized];
+        const permId = pendingLinks[0].permissionRequestId;
+        const callbackData = `perm:${action}:${permId}`;
+        const handled = broker.handlePermissionCallback(callbackData, msg.address.chatId);
+        const label = normalized === '1' ? 'Allow' : normalized === '2' ? 'Allow Session' : 'Deny';
+        if (handled) {
+          await deliver(adapter, {
+            address: msg.address,
+            text: `${label}: recorded.`,
+            parseMode: 'plain',
+            replyToMessageId: msg.messageId,
+          });
+        } else {
+          await deliver(adapter, {
+            address: msg.address,
+            text: `Permission not found or already resolved.`,
+            parseMode: 'plain',
+            replyToMessageId: msg.messageId,
+          });
+        }
+        ack();
+        return;
+      }
+      if (pendingLinks.length > 1) {
+        // Multiple pending permissions — numeric shortcut is ambiguous.
+        await deliver(adapter, {
+          address: msg.address,
+          text: `Multiple pending permissions (${pendingLinks.length}). Please use the full command:\n/perm allow|allow_session|deny <id>`,
+          parseMode: 'plain',
+          replyToMessageId: msg.messageId,
+        });
+        ack();
+        return;
+      }
+      // pendingLinks.length === 0: no pending permissions, fall through as normal message
+    } else if (rawText !== normalized && /^[123]$/.test(rawText) === false) {
+      // Log when normalization changed the text — helps diagnose encoding issues
+      const codePoints = [...rawText].map(c => 'U+' + c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0'));
+      console.log(`[bridge-manager] Shortcut candidate raw codepoints: ${codePoints.join(' ')} → normalized: "${normalized}"`);
+    }
   }
 
   // Check for IM commands (before sanitization — commands are validated individually)
@@ -800,6 +885,7 @@ async function handleCommand(
         '/sessions - List recent sessions',
         '/stop - Stop current session',
         '/perm allow|allow_session|deny &lt;id&gt; - Respond to permission request',
+        '1/2/3 - Quick permission reply (Feishu/QQ, single pending)',
         '/help - Show this help',
       ].join('\n');
       break;

@@ -65,20 +65,21 @@ export function buildPostContent(text: string): string {
     .trim();
 
   const content: Array<Array<{ tag: 'md' | 'text'; text: string }>> = [];
-  let lastWasSpacer = false;
+  const blocks = normalized
+    .split(/\n\s*\n/g)
+    .map(block => block
+      .split('\n')
+      .map(line => line.trimEnd())
+      .join('\n')
+      .trim())
+    .filter(Boolean);
 
-  for (const rawLine of normalized.split('\n')) {
-    const line = rawLine.trimEnd();
-    if (!line.trim()) {
-      if (content.length > 0 && !lastWasSpacer) {
-        content.push([{ tag: 'text', text: ' ' }]);
-        lastWasSpacer = true;
-      }
-      continue;
+  blocks.forEach((block, index) => {
+    if (index > 0) {
+      content.push([{ tag: 'text', text: ' ' }]);
     }
-    content.push([{ tag: 'md', text: line }]);
-    lastWasSpacer = false;
-  }
+    content.push([{ tag: 'md', text: block }]);
+  });
 
   return JSON.stringify({
     zh_cn: {
